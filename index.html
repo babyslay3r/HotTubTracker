@@ -8,7 +8,6 @@
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- Supabase Client -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
@@ -23,7 +22,6 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // --- CONFIGURATION ---
         const SUPABASE_URL = "https://lzdiozffnypzkxvnygyx.supabase.co";
         const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx6ZGlvemZmbnlwemt4dm55Z3l4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1OTU3MjMsImV4cCI6MjEwMDE3MTcyM30.sif9qw0LrKrn1lBS6sEkBNn3llEuaVHNgQxZA2mc4RI";
 
@@ -40,7 +38,6 @@
             const [editDate, setEditDate] = useState(new Date().toISOString().split('T')[0]);
             const [loading, setLoading] = useState(true);
 
-            // Fetch Data
             useEffect(() => {
                 async function fetchData() {
                     const { data: logData, error: logErr } = await supabase.from('logs').select('*').order('created_at', { ascending: false });
@@ -60,18 +57,13 @@
                 { id: 'D', label: 'Drain and Refill', color: 'bg-indigo-600' }
             ];
 
-            // Helper: Calculate days remaining
             const getDaysRemaining = (taskLabel) => {
                 const rule = rules.find(r => r.task_type === taskLabel);
                 if (!rule) return null;
-
                 const lastLog = logs.find(l => l.task_type === taskLabel);
                 if (!lastLog) return rule.interval_days;
-
                 const lastDate = new Date(lastLog.created_at);
-                const diffTime = Math.abs(new Date() - lastDate);
-                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                
+                const diffDays = Math.ceil(Math.abs(new Date() - lastDate) / (1000 * 60 * 60 * 24));
                 return rule.interval_days - diffDays;
             };
 
@@ -93,35 +85,49 @@
                 setIsModalOpen(true);
             };
 
+            // OPTIMISTIC SUBMISSION
             const submitLog = async () => {
+                const originalLogs = [...logs];
+                let newLogEntry;
+
                 if (isEditing && editingId) {
-                    const { error } = await supabase
-                        .from('logs')
-                        .update({ 
+                    newLogEntry = { ...logs.find(l => l.id === editingId), task_type: selectedTask, note: note, created_at: new Date(editDate) };
+                    // Update local state immediately
+                    setLogs(logs.map(l => l.id === editingId ? newLogEntry : l));
+                } else {
+                    newLogEntry = { id: Date.now(), task_type: selectedTask, note: note, created_at: new Date(editDate) };
+                    // Update local state immediately
+                    setLogs([newLogEntry, ...logs]);
+                }
+
+                try {
+                    if (isEditing && editingId) {
+                        await supabase.from('logs').update({ 
                             task_type: selectedTask, 
                             note: note, 
                             created_at: new Date(editDate) 
-                        })
-                        .eq('id', editingId);
-                    if (error) alert(error.message);
-                } else {
-                    const { error } = await supabase
-                        .from('logs')
-                        .insert([{ task_type: selectedTask, note: note, created_at: new Date(editDate) }]);
-                    if (error) alert(error.message);
+                        }).eq('id', editingId);
+                    } else {
+                        await supabase.from('logs').insert([{ task_type: selectedTask, note: note, created_at: new Date(editDate) }]);
+                    }
+                    setIsModalOpen(false);
+                    setNote("");
+                } catch (error) {
+                    alert("Failed to sync with cloud. Reverting change.");
+                    setLogs(originalLogs); // Rollback if cloud fails
                 }
-
-                setNote("");
-                setIsModalOpen(false);
-                setIsEditing(false);
-                setEditingId(null);
-                fetchData(); // Refresh list
             };
 
+            // OPTIMISTIC DELETE
             const deleteLog = async (id) => {
-                if(confirm("Delete this log?")) {
+                const originalLogs = [...logs];
+                setLogs(logs.filter(l => l.id !== id));
+
+                try {
                     await supabase.from('logs').delete().eq('id', id);
-                    fetchData();
+                } catch (error) {
+                    alert("Failed to delete. Reverting.");
+                    setLogs(originalLogs);
                 }
             }
 
@@ -138,7 +144,6 @@
                         {tasks.map((task) => {
                             const daysLeft = getDaysRemaining(task.label);
                             const isOverdue = daysLeft !== null && daysLeft <= 0;
-                            
                             return (
                                 <button
                                     key={task.id}
@@ -160,7 +165,7 @@
                     <div className="glass-card rounded-3xl p-6 shadow-xl">
                         <div className="flex justify-between items-center mb-4">
                             <h2 className="text-xl font-bold text-blue-900">Recent Activity</h2>
-                            <button onClick={() => supabase.from('logs').delete().neq('id', '0').then(fetchData)} className="text-xs text-red-400 underline">Clear All</button>
+                            <button onClick={() => supabase.from('logs').delete().neq('id', '0').then(() => setLogs([]))} className="text-xs text-red-400 underline">Clear All</button>
                         </div>
                         {logs.length === 0 ? (
                             <p className="text-gray-400 italic">No logs yet.</p>
@@ -235,5 +240,5 @@
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<HotTubApp />);
     </script>
-</body>
+</body
 </html>
