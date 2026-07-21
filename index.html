@@ -38,18 +38,19 @@
             const [editDate, setEditDate] = useState(new Date().toISOString().split('T')[0]);
             const [loading, setLoading] = useState(true);
             const [isSaving, setIsSaving] = useState(false);
-
-            // Fetch Data function
-            const fetchData = async () => {
-                const { data: logData, error: logErr } = await supabase.from('logs').select('*').order('created_at', { ascending: false });
-                const { data: ruleData, error: ruleErr } = await supabase.from('maintenance_rules').select('*');
-                
-                if (!logErr) setLogs(logData || []);
-                if (!ruleErr) setRules(ruleData || []);
-                setLoading(false);
-            };
+            
+            // Settings State
+            const [settingsModalOpen, setSettingsModalOpen] = useState(false);
 
             useEffect(() => {
+                async function fetchData() {
+                    const { data: logData, error: logErr } = await supabase.from('logs').select('*').order('created_at', { ascending: false });
+                    const { data: ruleData, error: ruleErr } = await supabase.from('maintenance_rules').select('*');
+                    
+                    if (!logErr) setLogs(logData || []);
+                    if (!ruleErr) setRules(ruleData || []);
+                    setLoading(false);
+                }
                 fetchData();
             }, []);
 
@@ -62,9 +63,11 @@
 
             const getDaysRemaining = (taskLabel) => {
                 const rule = rules.find(r => r.task_type === taskLabel);
-                if (!rule) return null;
+                if (!rule || rule.enabled === false) return null;
+
                 const lastLog = logs.find(l => l.task_type === taskLabel);
                 if (!lastLog) return rule.interval_days;
+
                 const lastDate = new Date(lastLog.created_at);
                 const diffDays = Math.ceil(Math.abs(new Date() - lastDate) / (1000 * 60 * 60 * 24));
                 return rule.interval_days - diffDays;
@@ -107,7 +110,7 @@
                                 task_type: selectedTask, 
                                 note: note, 
                                 created_at: new Date(editDate),
-                                id: crypto.randomUUID() // Use a real UUID string
+                                id: crypto.randomUUID() 
                              }]);
                     }
                     
@@ -115,7 +118,7 @@
                     setNote("");
                     setIsEditing(false);
                     setEditingId(null);
-                    await fetchData(); // Force a fresh fetch from cloud
+                    await fetchData(); 
                 } catch (error) {
                     alert("Error saving to cloud: " + error.message);
                 } finally {
@@ -134,13 +137,39 @@
                 }
             }
 
+            // Save settings to Supabase
+            const saveSettings = async () => {
+                setIsSaving(true);
+                try {
+                    const { error } = await supabase.from('maintenance_rules').upsert(rules);
+                    if (error) throw error;
+                    await fetchData();
+                    setSettingsModalOpen(false);
+                } catch (error) {
+                    alert("Error saving settings: " + error.message);
+                } finally {
+                    setIsSaving(false);
+                }
+            };
+
             if (loading) return <div className="flex h-screen items-center justify-center text-blue-900 font-bold">Loading App...</div>;
 
             return (
                 <div className="min-h-screen p-4 max-w-md mx-auto pb-24">
-                    <header className="mb-8 pt-4">
-                        <h1 className="text-3xl font-bold text-blue-900">Hot Tub Log</h1>
-                        <p className="text-blue-600">Smart Maintenance</p>
+                    <header className="mb-8 pt-4 flex justify-between items-start">
+                        <div>
+                            <h1 className="text-3xl font-bold text-blue-900">Hot Tub Log</h1>
+                            <p className="text-blue-600">Smart Maintenance</p>
+                        </div>
+                        <div className="text-right">
+                            <button 
+                                onClick={() => setSettingsModalOpen(true)}
+                                className="bg-blue-100 p-2 rounded-full mb-2 hover:bg-blue-200 transition-colors"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2V6z"></path><path d="M18 15a3 3 0 0 1-3 3l-2.7-2.7a1 1 0 0 0-1.4 1.4L14.5 18l-4-4a1 1 0 0 0-1.4 1.4L12 20a3 3 0 0 1-3-3l3.3-3.3a1 1 0 0 1 1.4 1.4L11 17l3-3a1 1 0 0 1 1.4 1.4L12 18l2.8-2.8a1 1 0 0 1 1.4 1.4l-3.3 3.3a3 3 0 0 1-3-3l3.3-3.3a1 1 0 0 1 1.4-1.4L18 15z"></path><path d="M12 18H4"></path><path d="M12 18v-6"></path><path d="M12 18l-4-4"></path><path d="M12 18l4-4"></path></svg>
+                            </button>
+                            <span className="text-[10px] font-bold text-gray-400">2024.07.20</span>
+                        </div>
                     </header>
 
                     <div className="grid grid-cols-1 gap-4 mb-8">
@@ -166,14 +195,7 @@
                     </div>
 
                     <div className="glass-card rounded-3xl p-6 shadow-xl">
-                        <div className="flex justify-between items-center mb-4">
-                            <h2 className="text-xl font-bold text-blue-900">Recent Activity</h2>
-                            <button onClick={() => {
-                                if(confirm("Delete all logs?")) {
-                                    supabase.from('logs').delete().neq('id', '0').then(fetchData);
-                                }
-                            }} className="text-xs text-red-400 underline">Clear All</button>
-                        </div>
+                        <h2 className="text-xl font-bold text-blue-900 mb-4">Recent Activity</h2>
                         {logs.length === 0 ? (
                             <p className="text-gray-400 italic">No logs yet.</p>
                         ) : (
@@ -198,6 +220,7 @@
                         )}
                     </div>
 
+                    {/* Log Entry Modal */}
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-6 z-50 backdrop-blur-sm">
                             <div className="bg-white rounded-3xl p-8 w-full max-w-sm shadow-2xl">
@@ -241,6 +264,57 @@
                                         className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg disabled:bg-blue-300"
                                     >
                                         {isSaving ? "Saving..." : isEditing ? "Update" : "Save Log"}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Settings Modal */}
+                    {settingsModalOpen && (
+                        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-6 z-50 backdrop-blur-sm">
+                            <div className="bg-white rounded-3xl p-8 w-full max-w-sm shadow-2xl">
+                                <h3 className="text-xl font-bold mb-4 text-blue-900">Maintenance Settings</h3>
+                                <div className="space-y-6">
+                                    {rules.map((rule, index) => (
+                                        <div key={index} className="flex flex-col gap-2 border-b pb-4 last:border-0">
+                                            <div className="flex justify-between items-center">
+                                                <span className="font-bold text-blue-800">{rule.task_type}</span>
+                                                <button 
+                                                    onClick={() => {
+                                                        const newRules = [...rules];
+                                                        newRules[index].enabled = !newRules[index].enabled;
+                                                        setRules(newRules);
+                                                    }}
+                                                    className={`text-xs px-2 py-1 rounded-full ${rules[index].enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}
+                                                >
+                                                    {rules[index].enabled ? "Enabled" : "Disabled"}
+                                                </button>
+                                            </div>
+                                            <div className="flex items-center gap-4">
+                                                <label className="text-xs text-gray-500">Interval (Days):</label>
+                                                <input 
+                                                    type="number" 
+                                                    className="w-20 p-1 border rounded"
+                                                    value={rule.interval_days}
+                                                    onChange={(e) => {
+                                                        const newRules = [...rules];
+                                                        newRules[index].interval_days = parseInt(e.target.value);
+                                                        setRules(newRules);
+                                                    }}
+                                                />
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="flex gap-3 mt-6">
+                                    <button onClick={() => setSettingsModalOpen(false)} className="flex-1 py-3 bg-gray-100 rounded-xl font-bold text-gray-600">Cancel</button>
+                                    <button 
+                                        onClick={saveSettings} 
+                                        disabled={isSaving}
+                                        className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg disabled:bg-blue-300"
+                                    >
+                                        {isSaving ? "Saving..." : "Save Settings"}
                                     </button>
                                 </div>
                             </div>
