@@ -37,16 +37,19 @@
             const [editingId, setEditingId] = useState(null);
             const [editDate, setEditDate] = useState(new Date().toISOString().split('T')[0]);
             const [loading, setLoading] = useState(true);
+            const [isSaving, setIsSaving] = useState(false);
+
+            // Fetch Data function
+            const fetchData = async () => {
+                const { data: logData, error: logErr } = await supabase.from('logs').select('*').order('created_at', { ascending: false });
+                const { data: ruleData, error: ruleErr } = await supabase.from('maintenance_rules').select('*');
+                
+                if (!logErr) setLogs(logData || []);
+                if (!ruleErr) setRules(ruleData || []);
+                setLoading(false);
+            };
 
             useEffect(() => {
-                async function fetchData() {
-                    const { data: logData, error: logErr } = await supabase.from('logs').select('*').order('created_at', { ascending: false });
-                    const { data: ruleData, error: ruleErr } = await supabase.from('maintenance_rules').select('*');
-                    
-                    if (!logErr) setLogs(logData || []);
-                    if (!ruleErr) setRules(ruleData || []);
-                    setLoading(false);
-                }
                 fetchData();
             }, []);
 
@@ -85,49 +88,49 @@
                 setIsModalOpen(true);
             };
 
-            // OPTIMISTIC SUBMISSION
             const submitLog = async () => {
-                const originalLogs = [...logs];
-                let newLogEntry;
-
-                if (isEditing && editingId) {
-                    newLogEntry = { ...logs.find(l => l.id === editingId), task_type: selectedTask, note: note, created_at: new Date(editDate) };
-                    // Update local state immediately
-                    setLogs(logs.map(l => l.id === editingId ? newLogEntry : l));
-                } else {
-                    newLogEntry = { id: Date.now(), task_type: selectedTask, note: note, created_at: new Date(editDate) };
-                    // Update local state immediately
-                    setLogs([newLogEntry, ...logs]);
-                }
-
+                setIsSaving(true);
                 try {
                     if (isEditing && editingId) {
-                        await supabase.from('logs').update({ 
-                            task_type: selectedTask, 
-                            note: note, 
-                            created_at: new Date(editDate) 
-                        }).eq('id', editingId);
+                        await supabase
+                            .from('logs')
+                            .update({ 
+                                task_type: selectedTask, 
+                                note: note, 
+                                created_at: new Date(editDate) 
+                            })
+                            .eq('id', editingId);
                     } else {
-                        await supabase.from('logs').insert([{ task_type: selectedTask, note: note, created_at: new Date(editDate) }]);
+                        await supabase
+                            .from('logs')
+                            .insert([{ 
+                                task_type: selectedTask, 
+                                note: note, 
+                                created_at: new Date(editDate),
+                                id: crypto.randomUUID() // Use a real UUID string
+                             }]);
                     }
+                    
                     setIsModalOpen(false);
                     setNote("");
+                    setIsEditing(false);
+                    setEditingId(null);
+                    await fetchData(); // Force a fresh fetch from cloud
                 } catch (error) {
-                    alert("Failed to sync with cloud. Reverting change.");
-                    setLogs(originalLogs); // Rollback if cloud fails
+                    alert("Error saving to cloud: " + error.message);
+                } finally {
+                    setIsSaving(false);
                 }
             };
 
-            // OPTIMISTIC DELETE
             const deleteLog = async (id) => {
-                const originalLogs = [...logs];
-                setLogs(logs.filter(l => l.id !== id));
-
-                try {
-                    await supabase.from('logs').delete().eq('id', id);
-                } catch (error) {
-                    alert("Failed to delete. Reverting.");
-                    setLogs(originalLogs);
+                if(confirm("Delete this log?")) {
+                    try {
+                        await supabase.from('logs').delete().eq('id', id);
+                        await fetchData();
+                    } catch (e) {
+                        alert("Error deleting: " + e.message);
+                    }
                 }
             }
 
@@ -165,7 +168,11 @@
                     <div className="glass-card rounded-3xl p-6 shadow-xl">
                         <div className="flex justify-between items-center mb-4">
                             <h2 className="text-xl font-bold text-blue-900">Recent Activity</h2>
-                            <button onClick={() => supabase.from('logs').delete().neq('id', '0').then(() => setLogs([]))} className="text-xs text-red-400 underline">Clear All</button>
+                            <button onClick={() => {
+                                if(confirm("Delete all logs?")) {
+                                    supabase.from('logs').delete().neq('id', '0').then(fetchData);
+                                }
+                            }} className="text-xs text-red-400 underline">Clear All</button>
                         </div>
                         {logs.length === 0 ? (
                             <p className="text-gray-400 italic">No logs yet.</p>
@@ -228,7 +235,13 @@
                                 </div>
                                 <div className="flex gap-3 mt-6">
                                     <button onClick={() => setIsModalOpen(false)} className="flex-1 py-3 bg-gray-100 rounded-xl font-bold text-gray-600">Cancel</button>
-                                    <button onClick={submitLog} className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg">{isEditing ? "Update" : "Save Log"}</button>
+                                    <button 
+                                        onClick={submitLog} 
+                                        disabled={isSaving}
+                                        className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg disabled:bg-blue-300"
+                                    >
+                                        {isSaving ? "Saving..." : isEditing ? "Update" : "Save Log"}
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -240,5 +253,5 @@
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<HotTubApp />);
     </script>
-</body
+</body>
 </html>
