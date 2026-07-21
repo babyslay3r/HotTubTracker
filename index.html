@@ -42,15 +42,18 @@
             // Settings State
             const [settingsModalOpen, setSettingsModalOpen] = useState(false);
 
+            // 1. Define fetchData at the top level of the component
+            const fetchData = async () => {
+                const { data: logData, error: logErr } = await supabase.from('logs').select('*').order('created_at', { ascending: false });
+                const { data: ruleData, error: ruleErr } = await supabase.from('maintenance_rules').select('*');
+                
+                if (!logErr) setLogs(logData || []);
+                if (!ruleErr) setRules(ruleData || []);
+                setLoading(false);
+            };
+
+            // 2. Call fetchData on mount
             useEffect(() => {
-                async function fetchData() {
-                    const { data: logData, error: logErr } = await supabase.from('logs').select('*').order('created_at', { ascending: false });
-                    const { data: ruleData, error: ruleErr } = await supabase.from('maintenance_rules').select('*');
-                    
-                    if (!logErr) setLogs(logData || []);
-                    if (!ruleErr) setRules(ruleData || []);
-                    setLoading(false);
-                }
                 fetchData();
             }, []);
 
@@ -137,7 +140,6 @@
                 }
             }
 
-            // Save settings to Supabase
             const saveSettings = async () => {
                 setIsSaving(true);
                 try {
@@ -327,5 +329,5 @@
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<HotTubApp />);
     </script>
-</body>
+</body
 </html>
